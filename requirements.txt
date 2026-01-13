@@ -1,14 +1,28 @@
 # Python Version: 3.11
+
+# Core
 pandas>=1.5
 numpy>=1.24
-scikit-learn==1.3.2 
+scikit-learn==1.3.2
+pyarrow
+
+# NLP / ML
 nltk
+sentence-transformers>=2.6.1
+faiss-cpu
+
+# Visualization
 matplotlib>=3.7
 seaborn>=0.12
-langchain
-langchain-community 
-langchain-huggingface 
-sentence-transformers 
-faiss-cpu 
- 
- 
+
+# 🔑 Hugging Face / Phi-3 compatibility
+transformers>=4.40.0
+accelerate>=0.28.0
+huggingface_hub[hf_xet]>=0.23.0
+
+# 🔗 LangChain (pin loosely but safely)
+langchain>=0.1.16
+langchain-core>=0.1.46
+langchain-community>=0.0.34
+langchain-huggingface>=0.0.6
+A
