@@ -1,90 +1,86 @@
+# --- app.py ---
 import gradio as gr
+import os, sys
+from huggingface_hub import hf_hub_download
+from langchain_community.llms import LlamaCpp
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_core.callbacks import StreamingStdOutCallbackHandler
+
+# 1. Setup project root
+project_root = os.path.abspath(os.getcwd())
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from src.complaintRagChain import ComplaintRAGChain
-from src.complaintVectorStore import vector_db
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from langchain_huggingface import HuggingFacePipeline
 
-# 1. SETUP THE LOCAL LLM (Same logic as Task 3 for consistency)
-print("=== Initializing Backend for UI ===")
-model_id = "microsoft/Phi-3-mini-4k-instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+# ================================
+# 1. SETUP THE CPU MODEL (SMART DOWNLOAD)
+# ================================
+print("=== Checking Model Status ===")
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device_map="auto",
-    trust_remote_code=True,
-    attn_implementation="eager" # Stability fix for Phi-3
+models_dir = os.path.join(project_root, "models")
+os.makedirs(models_dir, exist_ok=True)
+
+# This function is "smart": 
+# - If file exists in models_dir: It skips and returns path instantly.
+# - If file is missing: It downloads it with a progress bar.
+model_path = hf_hub_download(
+    repo_id="microsoft/Phi-3-mini-4k-instruct-gguf",
+    filename="Phi-3-mini-4k-instruct-q4.gguf",
+    local_dir=models_dir
 )
 
-pipe = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=512,
-    temperature=0.1,
-    do_sample=True,
-    eos_token_id=tokenizer.eos_token_id,
-    pad_token_id=tokenizer.eos_token_id
+print(f"✅ Model path verified: {model_path}")
+
+# Initialize the CPU-optimized LLM
+print("🧠 Loading LLM into RAM...")
+llm = LlamaCpp(
+    model_path=model_path,
+    n_ctx=2048,           
+    n_threads=4,          
+    temperature=0.1,      
+    verbose=False,
+    callbacks=[StreamingStdOutCallbackHandler()],
+    streaming=True
 )
 
-llm = HuggingFacePipeline(pipeline=pipe)
+# ================================
+# 2. INITIALIZE RAG SYSTEM
+# ================================
+print("📥 Loading Vector Store...")
+embeddings_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+index_path = os.path.join(project_root, "vector_store", "full_faiss_index")
 
-# 2. INITIALIZE THE RAG ANALYST
-# vector_db is imported from your existing script
+vector_db = FAISS.load_local(
+    index_path, 
+    embeddings_model, 
+    allow_dangerous_deserialization=True
+)
+
 analyst = ComplaintRAGChain(llm=llm, vector_db=vector_db)
+print("🚀 System Online.")
 
-# 3. DEFINE UI FUNCTION
-def process_query(message, history):
-    """
-    Main function to handle user questions.
-    Returns: The AI response and the formatted source documents.
-    """
-    # Run the RAG pipeline
+# ================================
+# 3. DEFINE GRADIO INTERFACE
+# ================================
+# ================================
+# 3. DEFINE GRADIO INTERFACE
+# ================================
+def predict(message, history):
+    # This calls your analyst logic
     response = analyst.query(message)
-    
-    answer = response['result']
-    sources = response['source_documents']
-    
-    # Format sources for the UI
-    formatted_sources = "### 📚 Evidence / Source Documents:\n"
-    for i, doc in enumerate(sources):
-        complaint_id = doc.metadata.get('complaint_id', 'Unknown')
-        product = doc.metadata.get('product_category', 'General')
-        content = doc.page_content[:300] + "..." # Truncate for readability
-        
-        formatted_sources += f"**[{i+1}] ID: {complaint_id} | Category: {product}**\n"
-        formatted_sources += f"> {content}\n\n"
-        
-    return answer, formatted_sources
+    return response["result"]
 
-# 4. BUILD THE GRADIO INTERFACE
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🏦 CrediTrust: Intelligent Complaint Analyst")
-    gr.Markdown("Transforming customer feedback into actionable insights for Product Managers.")
-    
-    with gr.Row():
-        with gr.Column(scale=2):
-            chatbot_output = gr.Textbox(label="Asha's AI Assistant Response", lines=10, interactive=False)
-            user_input = gr.Textbox(label="Ask a question about customer complaints...", placeholder="e.g., Why are people unhappy with Savings Accounts?")
-            with gr.Row():
-                submit_btn = gr.Button("Analyze Complaints", variant="primary")
-                clear_btn = gr.ClearButton()
-        
-        with gr.Column(scale=1):
-            source_display = gr.Markdown("### 📚 Evidence\nSource documents will appear here after analysis.")
+# Removed 'type="messages"' to fix the TypeError
+demo = gr.ChatInterface(
+    fn=predict, 
+    title="🏦 CrediTrust Complaint Analyst",
+    description="I check local complaint data to answer your financial queries.",
+    # If your Gradio is older, it uses a simple (user, bot) tuple list for history automatically
+)
 
-    # Define Button Actions
-    submit_btn.click(
-        fn=process_query, 
-        inputs=[user_input], 
-        outputs=[chatbot_output, source_display]
-    )
-    
-    # Reset everything when clear is clicked
-    clear_btn.add([user_input, chatbot_output, source_display])
-
-# 5. LAUNCH THE APP
 if __name__ == "__main__":
-    demo.launch(share=True) # Set share=True to get a public link for facilitators
+    # share=False ensures it stays on your local machine
+    # inbrowser=True opens the tab automatically
+    demo.launch(inbrowser=True)
