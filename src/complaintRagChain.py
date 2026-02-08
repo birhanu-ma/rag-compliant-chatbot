@@ -37,19 +37,18 @@ Answer:"""
         return "\n\n".join(doc.page_content for doc in docs)
 
     def query(self, user_input):
-        """
-        Executes the query. Matches the expected output format for your notebook.
-        """
-        response_text = self.chain.invoke(user_input)
+        # 1. Fetch documents once
+        source_docs = self.retriever.invoke(user_input)
         
-        # We manually fetch the source documents so your notebook loop doesn't break
-        source_docs = self.retriever.get_relevant_documents(user_input)
+        # 2. Format them
+        context_text = self._format_docs(source_docs)
+        
+        # 3. Feed the manual context directly to the prompt/LLM logic
+        # We define a sub-chain here that bypasses the retriever
+        llm_chain = self.prompt | self.llm | StrOutputParser()
+        response_text = llm_chain.invoke({"context": context_text, "question": user_input})
         
         return {
             "result": response_text,
             "source_documents": source_docs
         }
-
-# Maintain compatibility for the create_rag_chain function
-def create_rag_chain(llm, vector_db):
-    return ComplaintRAGChain(llm, vector_db)
