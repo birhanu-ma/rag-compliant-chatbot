@@ -35,13 +35,16 @@ print(f"✅ Model path verified: {model_path}")
 
 # Initialize the CPU-optimized LLM
 print("🧠 Loading LLM into RAM...")
+# Inside your app.py
 llm = LlamaCpp(
     model_path=model_path,
-    n_ctx=2048,           
-    n_threads=4,          
-    temperature=0.1,      
+    n_ctx=1024,           # Lowered context = much faster startup
+    n_threads=6,          # Set to 6 or 8 for better CPU utilization
+    n_batch=512,          # Processes the prompt in bigger chunks
+    max_tokens=200,       # Prevents the AI from talking too much
+    stop=["<|eot_id|>", "<|start_header_id|>", "user", "User:"],
+    temperature=0.0,      # Most efficient for factual answers
     verbose=False,
-    callbacks=[StreamingStdOutCallbackHandler()],
     streaming=True
 )
 
